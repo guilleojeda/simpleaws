@@ -1,15 +1,15 @@
 {
-  "ModelName": "AnOnlineShop",
+  "ModelName": "SimpleAWSEcommerce",
   "ModelMetadata": {
-    "Author": "Samaneh Utter",
-    "DateCreated": "Jun 24, 2020, 04:20 PM",
-    "DateLastModified": "Jun 24, 2020, 09:56 PM",
-    "Description": "This data model represents an Amazon DynamoDB schema for an online shop.",
+    "Author": "Guille Ojeda",
+    "DateCreated": "Apr 25, 2023, 05:37 PM",
+    "DateLastModified": "Apr 25, 2023, 05:37 PM",
+    "Description": "A DynamoDB schema for an e-commerce store",
     "Version": "1.0"
   },
   "DataModel": [
     {
-      "TableName": "OnlineShop",
+      "TableName": "SimpleAWSEcommerce",
       "KeyAttributes": {
         "PartitionKey": {
           "AttributeName": "PK",
