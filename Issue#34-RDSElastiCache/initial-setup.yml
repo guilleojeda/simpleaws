@@ -19,6 +19,7 @@ Resources:
     Properties:
       VpcId: !Ref SimpleAWSVPC
       CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -29,6 +30,7 @@ Resources:
     Properties:
       VpcId: !Ref SimpleAWSVPC
       CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -63,13 +65,13 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref SimpleAWSInternetGateway
 
-  SimpleAWSSubnetRouteTableAssociation:
+  SimpleAWSSubnetRouteTableAssociation1:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties:
       SubnetId: !Ref SimpleAWSSubnet1
       RouteTableId: !Ref SimpleAWSRouteTable
 
-  SimpleAWSSubnetRouteTableAssociation:
+  SimpleAWSSubnetRouteTableAssociation2:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties:
       SubnetId: !Ref SimpleAWSSubnet2
@@ -108,9 +110,44 @@ Resources:
           ToPort: 6379
           SourceSecurityGroupId: !Ref EC2SecurityGroup
 
+  EC2CloudWatchLogsRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal: 
+              Service: 
+                - "ec2.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore  # Enables AWS Systems Manager
+      Policies: 
+        - PolicyName: "CloudWatchLogs"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - Ref: EC2CloudWatchLogsRole
+
   EC2Instance:
     Type: AWS::EC2::Instance
     Properties:
+      IamInstanceProfile: !Ref EC2InstanceProfile
       InstanceType: t4g.small
       ImageId: !Ref LatestAmiId
       SubnetId: !Ref SimpleAWSSubnet1
@@ -121,6 +158,17 @@ Resources:
           #!/bin/bash
           # Install updates
           yum update -y
+
+          # Set up cloudwatch logs
+          yum install -y awslogs
+          sed -i 's/region = us-east-1/region = ${AWS::Region}/g' /etc/awslogs/awscli.conf
+          echo "[/home/ec2-user/app/app.log]" >> /etc/awslogs/awslogs.conf
+          echo "file = /home/ec2-user/app/app.log" >> /etc/awslogs/awslogs.conf
+          echo "log_group_name = /home/ec2-user/app/app.log" >> /etc/awslogs/awslogs.conf
+          echo "log_stream_name = {instance_id}" >> /etc/awslogs/awslogs.conf
+          echo "datetime_format = %b %d %H:%M:%S" >> /etc/awslogs/awslogs.conf
+          systemctl enable awslogsd
+          systemctl start awslogsd
 
           # Install Node.js and npm
           curl -sL https://rpm.nodesource.com/setup_16.x | bash -
@@ -135,7 +183,7 @@ Resources:
 
           # Create directory for the app and copy the files to it
           mkdir -p /home/ec2-user/app
-          cp -r /home/ec2-user/simpleaws/Issue%2334-RDSElastiCache/nodejsapp/* /home/ec2-user/app/
+          cp -r /home/ec2-user/simpleaws/Issue#34-RDSElastiCache/nodejsapp/* /home/ec2-user/app/
 
           # Navigate to the app directory
           cd /home/ec2-user/app
@@ -155,7 +203,7 @@ Resources:
           echo "export CACHE_DB=simpleaws" >> /etc/environment
 
           # Run app
-          nohup node index.js &
+          nohup node index.js > /home/ec2-user/app/app.log 2>&1 &
 
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup

@@ -53,7 +53,7 @@ app.get('/reset', async (req, res) => {
   }
 });
 
-// Set the port for your application
+// Set the port for the application
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {

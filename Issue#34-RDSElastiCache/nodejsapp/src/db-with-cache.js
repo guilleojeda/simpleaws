@@ -11,15 +11,19 @@ const pool = new Pool({
 
 module.exports = {
   query: async (text, params) => {
-    const key = JSON.stringify({ text, params });
-    const cacheResult = await redis.get(key);
+    if (text.toLowerCase().startsWith('select')) {
+      const key = JSON.stringify({ text, params });
+      const cacheResult = await redis.get(key);
 
-    if (cacheResult) {
-      return JSON.parse(cacheResult);
+      if (cacheResult) {
+        return JSON.parse(cacheResult);
+      } else {
+        const dbResult = await pool.query(text, params);
+        await redis.set(key, JSON.stringify(dbResult.rows));
+        return dbResult.rows;
+      }
     } else {
-      const dbResult = await pool.query(text, params);
-      await redis.set(key, JSON.stringify(dbResult.rows));
-      return dbResult.rows;
+      return pool.query(text, params);
     }
   },
   flushCache: async () => {
