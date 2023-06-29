@@ -1,4 +1,4 @@
-const db = require('./db.js');
+const db = require('./db-no-cache.js');
 
 // Function to create the table if it does not exist
 async function createTable() {
