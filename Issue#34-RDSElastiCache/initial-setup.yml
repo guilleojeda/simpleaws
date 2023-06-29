@@ -203,7 +203,9 @@ Resources:
           echo "export CACHE_DB=simpleaws" >> /etc/environment
 
           # Run app
-          nohup node index.js > /home/ec2-user/app/app.log 2>&1 &
+          nohup node src/index.js > /home/ec2-user/app/app.log 2>&1 &
+
+          echo "System up and running!"
 
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
