@@ -21,5 +21,8 @@ module.exports = {
       await redis.set(key, JSON.stringify(dbResult.rows));
       return dbResult.rows;
     }
+  },
+  flushCache: async () => {
+    await redis.flushall();
   }
 };

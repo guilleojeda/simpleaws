@@ -1,0 +1,201 @@
+Parameters:
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64'
+
+Resources:
+  SimpleAWSVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSVPC
+
+  SimpleAWSSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSSubnet1
+
+  SimpleAWSSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSSubnet2
+
+  SimpleAWSInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: SimpleAWSInternetGateway
+
+  SimpleAWSVPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      InternetGatewayId: !Ref SimpleAWSInternetGateway
+
+  SimpleAWSRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      Tags:
+        - Key: Name
+          Value: SimpleAWSRouteTable
+
+  SimpleAWSRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: SimpleAWSVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref SimpleAWSRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SimpleAWSInternetGateway
+
+  SimpleAWSSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SimpleAWSSubnet1
+      RouteTableId: !Ref SimpleAWSRouteTable
+
+  SimpleAWSSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SimpleAWSSubnet2
+      RouteTableId: !Ref SimpleAWSRouteTable
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access on port 3000
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access to RDS
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access to ElastiCache
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t4g.small
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref SimpleAWSSubnet1
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Install updates
+          yum update -y
+
+          # Install Node.js and npm
+          curl -sL https://rpm.nodesource.com/setup_16.x | bash -
+          yum install -y nodejs
+
+          # Install git
+          yum install -y git
+
+          # Clone the whole repo
+          cd /home/ec2-user
+          git clone https://github.com/guilleojeda/simpleaws.git
+
+          # Create directory for the app and copy the files to it
+          mkdir -p /home/ec2-user/app
+          cp -r /home/ec2-user/simpleaws/Issue%2334-RDSElastiCache/nodejsapp/* /home/ec2-user/app/
+
+          # Navigate to the app directory
+          cd /home/ec2-user/app
+
+          # Install app dependencies
+          npm install
+
+          # Set Environment Variables
+          echo "export DB_HOST=${RDSInstance.Endpoint.Address}" >> /etc/environment
+          echo "export DB_PORT=5432" >> /etc/environment
+          echo "export DB_USER=simpleaws" >> /etc/environment
+          echo "export DB_PASSWORD=simpleaws#34" >> /etc/environment
+          echo "export DB_DATABASE=simpleaws" >> /etc/environment
+          echo "export CACHE_HOST=${ElastiCacheCluster.RedisEndpoint.Address}" >> /etc/environment
+          echo "export CACHE_PORT=6379" >> /etc/environment
+          echo "export CACHE_PASSWORD=simpleaws#34" >> /etc/environment
+          echo "export CACHE_DB=simpleaws" >> /etc/environment
+
+          # Run app
+          nohup node index.js &
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS instance
+      SubnetIds:
+        - !Ref SimpleAWSSubnet1
+        - !Ref SimpleAWSSubnet2
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: 20
+      MasterUsername: simpleaws
+      MasterUserPassword: simpleaws#34
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet group for ElastiCache
+      SubnetIds:
+        - !Ref SimpleAWSSubnet1
+        - !Ref SimpleAWSSubnet2
+
+  ElastiCacheCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      CacheNodeType: cache.t3.micro
+      Engine: redis
+      NumCacheNodes: 1
+      VpcSecurityGroupIds:
+        - !Ref CacheSecurityGroup
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+
+Outputs:
+  EC2InstancePublicIp:
+    Description: The public IP address of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
