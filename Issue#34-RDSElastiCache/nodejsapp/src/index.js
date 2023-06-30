@@ -32,15 +32,6 @@ app.get('/nocache', async (req, res) => {
   res.json({ data: dbResponse, elapsedTime: elapsedTime });
 });
 
-app.get('/reset', async (req, res) => {
-  try {
-    await db.flushCache();
-    console.log('All data flushed from Redis');
-  } catch (err) {
-    console.error('Error flushing data from Redis:', err);
-  }
-});
-
 // Set the port for the application
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

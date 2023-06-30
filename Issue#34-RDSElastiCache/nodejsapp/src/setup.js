@@ -33,7 +33,7 @@ async function insertInitialData() {
       let insertQuery = 'INSERT INTO simple_aws (message) VALUES ';
       const params = [];
         let paramIndex = 1;
-        for (let i = 0; i < 10000000; i++) {
+        for (let i = 0; i < 50000; i++) {
           insertQuery += `($${paramIndex}),`;
           params.push('not this one');
           paramIndex++;
