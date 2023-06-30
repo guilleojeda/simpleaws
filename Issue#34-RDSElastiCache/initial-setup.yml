@@ -185,11 +185,10 @@ Resources:
           echo "DB_HOST=${RDSInstance.Endpoint.Address}" >> /home/ec2-user/app/.env
           echo "DB_PORT=5432" >> /home/ec2-user/app/.env
           echo "DB_USER=simpleaws" >> /home/ec2-user/app/.env
-          echo "DB_PASSWORD=simpleaws#34" >> /home/ec2-user/app/.env
+          echo "DB_PASSWORD=simpleawsissue34" >> /home/ec2-user/app/.env
           echo "DB_DATABASE=simpleaws" >> /home/ec2-user/app/.env
           echo "CACHE_HOST=${ElastiCacheCluster.RedisEndpoint.Address}" >> /home/ec2-user/app/.env
           echo "CACHE_PORT=6379" >> /home/ec2-user/app/.env
-          echo "CACHE_DB=simpleaws" >> /home/ec2-user/app/.env
 
 
           # Run app
@@ -212,7 +211,8 @@ Resources:
       DBInstanceClass: db.t4g.micro
       AllocatedStorage: 20
       MasterUsername: simpleaws
-      MasterUserPassword: simpleaws#34
+      MasterUserPassword: simpleawsissue34
+      DBName: simpleaws
       VPCSecurityGroups:
         - !Ref RDSSecurityGroup
       DBSubnetGroupName: !Ref DBSubnetGroup

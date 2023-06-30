@@ -22,13 +22,25 @@ async function insertInitialData() {
   try {
     const initialDataCheck = await db.query('SELECT COUNT(*) FROM simple_aws');
     if (initialDataCheck.rows[0].count === '0') {
-      // The table is empty. Insert initial data.
-      const initialDataQuery = `
+      // Insert initial data.
+      const initialDataQuery1 = `
         INSERT INTO simple_aws (message)
         VALUES ('Thank you for being a subscriber!');
       `;
 
-      await db.query(initialDataQuery);
+      await db.query(initialDataQuery1);
+
+      let insertQuery = 'INSERT INTO simple_aws (message) VALUES ';
+      const params = [];
+        let paramIndex = 1;
+        for (let i = 0; i < 1000000; i++) {
+          insertQuery += `($${paramIndex}),`;
+          params.push('not this one');
+          paramIndex++;
+        }
+        // Remove the trailing comma and add a semicolon to end the query
+        insertQuery = insertQuery.slice(0, -1) + ';';
+        await db.query(insertQuery, params);
       console.log("Initial data inserted successfully.");
     } else {
       console.log("Initial data already present, skipping insertion.");

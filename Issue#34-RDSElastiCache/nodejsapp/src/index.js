@@ -6,7 +6,7 @@ const dbWithCache = require('./db-with-cache');
 require('./setup.js');
 const app = express();
 app.use(cors());
-const slowQuery = 'WITH RECURSIVE slow_query AS (SELECT 1 AS val UNION ALL SELECT val+1 FROM slow_query WHERE val < 5000000) SELECT * FROM simple_aws LIMIT 1;';
+const slowQuery = "SELECT * FROM simple_aws WHERE message='Thank you for being a subscriber!' LIMIT 1;";
 
 app.get('/withcache', async (req, res) => {
   const start = Date.now();
