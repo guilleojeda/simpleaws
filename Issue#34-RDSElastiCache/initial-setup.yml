@@ -159,17 +159,6 @@ Resources:
           # Install updates
           yum update -y
 
-          # Set up cloudwatch logs
-          yum install -y awslogs
-          sed -i 's/region = us-east-1/region = ${AWS::Region}/g' /etc/awslogs/awscli.conf
-          echo "[/home/ec2-user/app/app.log]" >> /etc/awslogs/awslogs.conf
-          echo "file = /home/ec2-user/app/app.log" >> /etc/awslogs/awslogs.conf
-          echo "log_group_name = /home/ec2-user/app/app.log" >> /etc/awslogs/awslogs.conf
-          echo "log_stream_name = {instance_id}" >> /etc/awslogs/awslogs.conf
-          echo "datetime_format = %b %d %H:%M:%S" >> /etc/awslogs/awslogs.conf
-          systemctl enable awslogsd
-          systemctl start awslogsd
-
           # Install Node.js and npm
           curl -sL https://rpm.nodesource.com/setup_16.x | bash -
           yum install -y nodejs
@@ -200,7 +189,6 @@ Resources:
           echo "DB_DATABASE=simpleaws" >> /home/ec2-user/app/.env
           echo "CACHE_HOST=${ElastiCacheCluster.RedisEndpoint.Address}" >> /home/ec2-user/app/.env
           echo "CACHE_PORT=6379" >> /home/ec2-user/app/.env
-          echo "CACHE_PASSWORD=simpleaws#34" >> /home/ec2-user/app/.env
           echo "CACHE_DB=simpleaws" >> /home/ec2-user/app/.env
 
 
