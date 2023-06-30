@@ -33,7 +33,7 @@ async function insertInitialData() {
       let insertQuery = 'INSERT INTO simple_aws (message) VALUES ';
       const params = [];
         let paramIndex = 1;
-        for (let i = 0; i < 1000000; i++) {
+        for (let i = 0; i < 10000000; i++) {
           insertQuery += `($${paramIndex}),`;
           params.push('not this one');
           paramIndex++;
@@ -42,6 +42,8 @@ async function insertInitialData() {
         insertQuery = insertQuery.slice(0, -1) + ';';
         await db.query(insertQuery, params);
       console.log("Initial data inserted successfully.");
+      const checkInsertion = await db.query('SELECT COUNT(*) FROM simple_aws');
+      console.log('Current number of rows: ' + initialDataCheck.rows[0]);
     } else {
       console.log("Initial data already present, skipping insertion.");
     }
