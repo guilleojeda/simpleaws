@@ -192,15 +192,17 @@ Resources:
           npm install
 
           # Set Environment Variables
-          echo "export DB_HOST=${RDSInstance.Endpoint.Address}" >> /etc/environment
-          echo "export DB_PORT=5432" >> /etc/environment
-          echo "export DB_USER=simpleaws" >> /etc/environment
-          echo "export DB_PASSWORD=simpleaws#34" >> /etc/environment
-          echo "export DB_DATABASE=simpleaws" >> /etc/environment
-          echo "export CACHE_HOST=${ElastiCacheCluster.RedisEndpoint.Address}" >> /etc/environment
-          echo "export CACHE_PORT=6379" >> /etc/environment
-          echo "export CACHE_PASSWORD=simpleaws#34" >> /etc/environment
-          echo "export CACHE_DB=simpleaws" >> /etc/environment
+          touch /home/ec2-user/app/.env
+          echo "DB_HOST=${RDSInstance.Endpoint.Address}" >> /home/ec2-user/app/.env
+          echo "DB_PORT=5432" >> /home/ec2-user/app/.env
+          echo "DB_USER=simpleaws" >> /home/ec2-user/app/.env
+          echo "DB_PASSWORD=simpleaws#34" >> /home/ec2-user/app/.env
+          echo "DB_DATABASE=simpleaws" >> /home/ec2-user/app/.env
+          echo "CACHE_HOST=${ElastiCacheCluster.RedisEndpoint.Address}" >> /home/ec2-user/app/.env
+          echo "CACHE_PORT=6379" >> /home/ec2-user/app/.env
+          echo "CACHE_PASSWORD=simpleaws#34" >> /home/ec2-user/app/.env
+          echo "CACHE_DB=simpleaws" >> /home/ec2-user/app/.env
+
 
           # Run app
           nohup node src/index.js > /home/ec2-user/app/app.log 2>&1 &

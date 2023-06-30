@@ -1,9 +1,9 @@
 const express = require('express');
 const cors = require('cors');
+require('dotenv').config();
 const dbNoCache = require('./db-no-cache');
 const dbWithCache = require('./db-with-cache');
 require('./setup.js');
-require('dotenv').config();
 const app = express();
 app.use(cors());
 const slowQuery = 'WITH RECURSIVE slow_query AS (SELECT 1 AS val UNION ALL SELECT val+1 FROM slow_query WHERE val < 5000000) SELECT * FROM simple_aws LIMIT 1;';
