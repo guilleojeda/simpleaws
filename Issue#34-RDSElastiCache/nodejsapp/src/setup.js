@@ -43,7 +43,7 @@ async function insertInitialData() {
         await db.query(insertQuery, params);
       console.log("Initial data inserted successfully.");
       const checkInsertion = await db.query('SELECT COUNT(*) FROM simple_aws');
-      console.log('Current number of rows: ' + initialDataCheck.rows[0]);
+      console.log('Current number of rows: ' + initialDataCheck.rows[0].count);
     } else {
       console.log("Initial data already present, skipping insertion.");
     }
