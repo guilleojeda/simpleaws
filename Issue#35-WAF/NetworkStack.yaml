@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Vpc Stack with 2 public subnets in separate AZs
+Metadata: {}
+Parameters:
+  VPCCIDR:
+    Type: String
+  PublicSubnet1CIDR:
+    Type: String
+  PublicSubnet2CIDR:
+    Type: String
+  AllowedPublicRange:
+    Type: String
+Mappings: {}
+Conditions: {}
+Resources:
+  CustomVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VPCCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-VPC
+  FirstSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 0
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      CidrBlock:
+        Ref: PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-FIRSTSUBNET
+      VpcId:
+        Ref: CustomVPC
+  SecondSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+        Fn::Select:
+        - 1
+        - Fn::GetAZs:
+            Ref: AWS::Region
+      CidrBlock:
+        Ref: PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-SECONDSUBNET
+      VpcId:
+        Ref: CustomVPC
+  SimpleAWSRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: CustomVPC
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-RouteTable
+  FirstSubnetRouteTableAssociation:
+    DependsOn:
+    - SimpleAWSRouteTable
+    - FirstSubnet
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: SimpleAWSRouteTable
+      SubnetId:
+        Ref: FirstSubnet
+  SecondSubnetRouteTableAssociation:
+    DependsOn:
+    - SimpleAWSRouteTable
+    - FirstSubnet
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: SimpleAWSRouteTable
+      SubnetId:
+        Ref: SecondSubnet
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-InternetGateway
+  InternetVpcAssociation:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId:
+        Ref: IGW
+      VpcId:
+        Ref: CustomVPC
+  Route:
+    DependsOn:
+    - SimpleAWSRouteTable
+    - IGW
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock:
+        Ref: AllowedPublicRange
+      GatewayId:
+        Ref: IGW
+      RouteTableId:
+        Ref: SimpleAWSRouteTable
+Outputs:
+  AllowedPublicRange:
+    Description: White listed public IP for access
+    Value:
+      Ref: AllowedPublicRange
+  SimpleAWSFirstSubnetID:
+    Description: Subnet to attach to EC2
+    Value:
+      Ref: FirstSubnet
+  SimpleAWSSecondSubnetID:
+    Description: Subnet to attach to EC2
+    Value:
+      Ref: SecondSubnet
+  VpcId:
+    Description: VPC to attach to Security Group
+    Value:
+      Ref: CustomVPC

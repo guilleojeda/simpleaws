@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Metadata:
+  Version: '1.1.4'
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: 'Required resources'
+      Parameters:
+      - AMIforWebServers
+      - VPCCIDR
+      - PublicSubnet1CIDR
+      - PublicSubnet2CIDR
+      - AllowedPublicRange
+      - OpenWebPort
+    ParameterLabels:
+      AMIforWebServers:
+        default: AMI for web servers
+        Description: Must be a Linux2 AMI
+      VPCCIDR:
+        default: VPC CIDR
+        Description: VPC CIDR
+      PublicSubnet1CIDR:
+        default: First Subnet
+        Description: First subnet CIDR block
+      PublicSubnet2CIDR:
+        default: Second Subnet
+        Description: Second subnet CIDR block
+      OpenWebPort:
+        default: Web Port
+        Description: Port our web application is listening on
+      AllowedPublicRange:
+        default: Allowed public IPs
+        Description: Public IPs to whitelist, normally it's public range or IPs
+Parameters:
+  AMIforWebServers:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn-ami-hvm-x86_64-gp2
+  AllowedPublicRange:
+    Description: Public IPs to whitelist
+    Type: String
+    Default: 0.0.0.0/0
+  VPCCIDR:
+    Description: VPC CIDR range
+    Default: 10.10.0.0/16
+    Type: String
+  PublicSubnet1CIDR:
+    Description: First subnet CIDR
+    Default: 10.10.1.0/24
+    Type: String
+  PublicSubnet2CIDR:
+    Description: Second subnet CIDR
+    Default: 10.10.2.0/24
+    Type: String
+  OpenWebPort:
+    Description: Port our application is listening on
+    Default: 80
+    Type: Number
+Resources:
+#Network stack  
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        VPCCIDR: !Ref VPCCIDR
+        PublicSubnet1CIDR: !Ref PublicSubnet1CIDR
+        PublicSubnet2CIDR: !Ref PublicSubnet2CIDR
+        AllowedPublicRange: !Ref AllowedPublicRange
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-VPC
+      TemplateURL: https://simpleaws-public-cfn-templates.s3.amazonaws.com/Issue35/NetworkStack.yaml
+      TimeoutInMinutes: 5
+#Security stack   
+  SecurityStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AllowedPublicRange: !Ref AllowedPublicRange
+        OpenWebPort: !Ref OpenWebPort
+        SimpleAWSVPCID:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.VpcId
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-SecurityGroup
+      TemplateURL: https://simpleaws-public-cfn-templates.s3.amazonaws.com/Issue35/SecurityStack.yaml
+      TimeoutInMinutes: 5
+#Instance stack  
+  InstanceStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        AMIforWebServers: !Ref AMIforWebServers
+        WebSecurityGroup:
+          Fn::GetAtt:
+          - SecurityStack
+          - Outputs.WebSecurityGroup
+        OpenWebPort: !Ref OpenWebPort
+        ALBSecurityGroup:
+          Fn::GetAtt:
+          - SecurityStack
+          - Outputs.ALBSecurityGroup
+        FirstSubnetID:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.SimpleAWSFirstSubnetID
+        SimpleAWSVPCID:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.VpcId
+        SecondSubnetID:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.SimpleAWSSecondSubnetID
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-ASG
+      TemplateURL: https://simpleaws-public-cfn-templates.s3.amazonaws.com/Issue35/InstanceStack.yaml
+      TimeoutInMinutes: 10
+Outputs:
+  JuiceShopURL:
+    Value:
+      Fn::GetAtt:
+      - InstanceStack
+      - Outputs.SiteURL
+  SimpleAWSLoadBalancer:
+    Value:
+      Fn::GetAtt:
+      - InstanceStack
+      - Outputs.SimpleAWSLoadBalancer
