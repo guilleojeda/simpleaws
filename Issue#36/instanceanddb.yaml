@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 instance with Session Manager, RDS instance, and connectivity
+Metadata: {}
+Parameters:
+  VPC:
+    Type: String
+  PublicSubnet0:
+    Type: String
+  PrivateSubnet0:
+    Type: String
+  PrivateSubnet1:
+    Type: String
+  PrivateSubnet0AvailabilityZone:
+    Type: String
+  DbUser:
+    Type: String
+  DbPassword:
+    Type: String
+  LatestAmiId:
+    Type: String
+Mappings: {}
+Conditions: {}
+Resources:
+
+
+## Postgres
+
+  DBEncryptionKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "KMS key used to encrypt RDS instance created in CFN stack: ${AWS::StackName}"
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: default
+        Statement:
+          Sid: "Default"
+          Effect: "Allow"
+          Principal:
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          Action: "kms:*"
+          Resource: "*"
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Cfn managed DB subnet group
+      SubnetIds: 
+        - !Ref PrivateSubnet0
+        - !Ref PrivateSubnet1
+      Tags:
+        - Key: 'Name'
+          Value: !Sub "Database-subnet-group-Simple-AWS"
+        - Key: Application
+          Value: "Simple AWS"
+
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DatabaseName: 'simpleaws'
+      DBClusterIdentifier: 'simpleawsissue36'
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      Engine: 'aurora-postgresql'
+      EngineVersion: '14.4'
+      Port: 5432
+      EngineMode: provisioned
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: '09:54-10:24'
+      PreferredMaintenanceWindow: Sun:04:00-Sun:08:00
+      Tags:
+        - Key: 'Name'
+          Value: 'simpleawsissue36'
+        - Key: Application
+          Value: "Simple AWS"
+      VpcSecurityGroupIds: 
+        - !GetAtt PostgresSecurityGroup.GroupId
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      EnableIAMDatabaseAuthentication: false
+      KmsKeyId: !Ref DBEncryptionKMSKey
+      StorageEncrypted: true
+    DependsOn:
+      - DatabaseSubnetGroup
+
+  RDSDBInstance1: 
+    Type: "AWS::RDS::DBInstance"
+    Properties: 
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceClass: "db.t4g.medium"
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      Engine: 'aurora-postgresql'
+      EngineVersion: '14.4'
+      AvailabilityZone: !Ref PrivateSubnet0AvailabilityZone
+
+# Instance
+  SimpleAWSEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      IamInstanceProfile: !Ref SimpleAWSInstanceProfile
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref PublicSubnet0
+      InstanceType: t4g.small
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+
+  SimpleAWSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+      - Ref: SimpleAWSRole
+  SimpleAWSRolePolicies:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SimpleAWSSystemManagerPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - ssmmessages:CreateControlChannel
+          - ssmmessages:CreateDataChannel
+          - ssmmessages:OpenControlChannel
+          - ssmmessages:OpenDataChannel
+          - ssm:UpdateInstanceInformation
+          Resource: '*'
+        - Effect: Allow
+          Action:
+          - s3:GetEncryptionConfiguration
+          Resource: '*'
+      Roles:
+      - Ref: SimpleAWSRole
+  SimpleAWSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+
+# SGs
+  PostgresSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: PostgresSecurityGroup
+      GroupDescription: Postgres security group
+      VpcId: !Ref VPC
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: InstanceSecurityGroup
+      GroupDescription: Instance security group
+      VpcId: !Ref VPC
+
+  PostgresSecurityGroupIngressFromInstance:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt PostgresSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !GetAtt InstanceSecurityGroup.GroupId
+
+Outputs:
+  DbEndpoint:
+    Description: The address of the DB RW endpoint
+    Value: !GetAtt [DatabaseCluster, Endpoint.Address]

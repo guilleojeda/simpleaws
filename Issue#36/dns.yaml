@@ -1,0 +1,36 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private hosted zone
+Metadata: {}
+Parameters:
+  DNSName:
+    Type: String
+  VPCId:
+    Type: String
+  DbEndpoint:
+    Type: String
+Mappings: {}
+Conditions: {}
+Resources:
+  HostedZone: 
+    Type: "AWS::Route53::HostedZone"
+    Properties: 
+      HostedZoneConfig: 
+        Comment: 'Private hosted zone'
+      Name: !Ref DNSName
+      VPCs: 
+        - 
+          VPCId: !Ref VPCId
+          VPCRegion: !Ref AWS::Region
+      HostedZoneTags: 
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateHostedZone
+  DNSRecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZone
+      Name: !Join [ "", [ "tmdb.", !Join [ "", [ !Ref DNSName, "." ] ] ] ]
+      Type: CNAME
+      TTL: '60'
+      ResourceRecords:
+      - !Ref DbEndpoint #- !GetAtt RDSDatabase.Endpoint.Address
+Outputs: {}

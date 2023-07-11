@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Metadata:
+  Version: '1.1.4'
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: 'Required parameters'
+      Parameters:
+      - VPCCIDR
+      - PublicSubnet0CIDR
+      - PublicSubnet1CIDR
+      - PrivateSubnet0CIDR
+      - PrivateSubnet1CIDR
+      - DbUser
+      - DbPassword
+      - LatestAmiId
+    ParameterLabels:
+      VPCCIDR:
+        default: VPC CIDR
+        Description: VPC CIDR
+      PublicSubnet0CIDR:
+        default: First Public Subnet
+        Description: First public subnet CIDR block
+      PublicSubnet1CIDR:
+        default: Second Public Subnet
+        Description: Second public subnet CIDR block
+      PrivateSubnet0CIDR:
+        default: First Private Subnet
+        Description: First private subnet CIDR block
+      PrivateSubnet1CIDR:
+        default: Second Private Subnet
+        Description: Second private subnet CIDR block
+      DbUser:
+        default: Database user
+        Description: User for the database
+      DbPassword:
+        default: Database password
+        Description: Password for the database. In a real template you shouldn't be passing the password here
+      LatestAmiId:
+        default: Amazon Linux AMI ID
+        Description: ID of the latest Amazon Linux AMI
+Parameters:
+  VPCCIDR:
+    Description: VPC CIDR range
+    Default: 10.10.0.0/16
+    Type: String
+  PublicSubnet0CIDR:
+    Description: First subnet CIDR
+    Default: 10.10.0.0/22
+    Type: String
+  PublicSubnet1CIDR:
+    Description: Second subnet CIDR
+    Default: 10.10.4.0/22
+    Type: String
+  PrivateSubnet0CIDR:
+    Description: First subnet CIDR
+    Default: 10.10.10.0/22
+    Type: String
+  PrivateSubnet1CIDR:
+    Description: Second subnet CIDR
+    Default: 10.10.14.0/22
+    Type: String
+  DbUser:
+    Type: String
+    Description: User for the database
+    Default: 'SimpleAWS'
+  DbPassword:
+    Type: String
+    Description: Password for the database. In a real template you shouldn't be passing the password here
+    Default: 'SimpleAWSDbPassword'
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64'
+
+Resources:
+#Network stack 
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        VPCCIDR: !Ref VPCCIDR
+        PublicSubnet0CIDR: !Ref PublicSubnet0CIDR
+        PublicSubnet1CIDR: !Ref PublicSubnet1CIDR
+        PrivateSubnet0CIDR: !Ref PrivateSubnet0CIDR
+        PrivateSubnet1CIDR: !Ref PrivateSubnet1CIDR
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-VPC
+      TemplateURL: https://simpleaws-public-cfn-templates.s3.amazonaws.com/Issue36/network.yaml
+      TimeoutInMinutes: 5
+#Instance and DB stack 
+  InstanceAndDbStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        VPC:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.VpcId
+        PublicSubnet0:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.PublicSubnet0ID
+        PrivateSubnet0:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.PrivateSubnet0ID
+        PrivateSubnet1:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.PrivateSubnet1ID
+        PrivateSubnet0AvailabilityZone:
+          Fn::GetAtt:
+          - NetworkStack
+          - Outputs.PrivateSubnet0AvailabilityZone
+        DbUser: !Ref DbUser
+        DbPassword: !Ref DbPassword
+        LatestAmiId: !Ref LatestAmiId
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-InstanceAndDb
+      TemplateURL: https://simpleaws-public-cfn-templates.s3.amazonaws.com/Issue36/instanceanddb.yaml
+      TimeoutInMinutes: 20
+
+Outputs:
+  DbEndpoint: 
+    Description: The address of the DB RW endpoint
+    Value: 
+      Fn::GetAtt:
+      - InstanceAndDbStack
+      - Outputs.DbEndpoint
