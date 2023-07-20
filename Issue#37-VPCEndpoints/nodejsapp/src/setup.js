@@ -1,5 +1,3 @@
-const db = require('./db.js');
-
 const bucketName = process.env.S3_BUCKET_NAME;
 const fileName = process.env.FILE_NAME;
 

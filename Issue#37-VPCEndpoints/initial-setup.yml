@@ -138,6 +138,7 @@ Resources:
         - Ref: EC2Role
 
   EC2Instance:
+    DependsOn: WebsiteBucket
     Type: AWS::EC2::Instance
     Properties:
       IamInstanceProfile: !Ref EC2InstanceProfile
@@ -165,7 +166,7 @@ Resources:
 
           # Create directory for the app and copy the files to it
           mkdir -p /home/ec2-user/app
-          cp -r /home/ec2-user/simpleaws/Issue#37-ZeroTrust/nodejsapp/* /home/ec2-user/app/
+          cp -r /home/ec2-user/simpleaws/Issue#37-VPCEndpoints/nodejsapp/* /home/ec2-user/app/
 
           # Navigate to the app directory
           cd /home/ec2-user/app
@@ -185,8 +186,6 @@ Resources:
 
   WebsiteBucket:
     Type: 'AWS::S3::Bucket'
-    DependsOn:
-      - LogsBucket
     Properties:
       BucketName: !Ref BucketName
       OwnershipControls:
