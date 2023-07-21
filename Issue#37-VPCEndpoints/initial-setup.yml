@@ -90,6 +90,17 @@ Resources:
           ToPort: 3000
           CidrIp: 0.0.0.0/0
 
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access to the VPC Endpoint
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+
   EC2Role:
     Type: AWS::IAM::Role
     Properties: 
@@ -178,6 +189,7 @@ Resources:
           touch /home/ec2-user/app/.env
           echo "S3_BUCKET_NAME=${BucketName}" >> /home/ec2-user/app/.env
           echo "FILE_NAME=thankyou.txt" >> /home/ec2-user/app/.env
+          echo "AWS_REGION=${AWS::Region}" >> /home/ec2-user/app/.env
 
           # Run app
           nohup node src/index.js > /home/ec2-user/app/app.log 2>&1 &

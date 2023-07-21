@@ -1,6 +1,9 @@
-const AWS = require('aws-sdk');
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const bucketName = process.env.S3_BUCKET_NAME;
 const fileName = process.env.FILE_NAME;
+const region = process.env.AWS_REGION;
+
+const s3Client = new S3Client({ region });
 
 async function uploadToS3() {
   const content = "thanks for being a Simple AWS subscriber";
@@ -10,10 +13,10 @@ async function uploadToS3() {
     Body: content,
     ContentType: "text/plain"
   };
-  const s3 = new AWS.S3();
+
   try {
-    const data = await s3.upload(params).promise();
-    console.log(`File uploaded successfully at ${data.Location}`);
+    const data = await s3Client.send(new PutObjectCommand(params));
+    console.log(`File uploaded successfully. ${data}`);
   } catch (e) {
     console.error('Upload Error', e);
   }
