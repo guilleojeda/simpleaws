@@ -27,7 +27,9 @@ async function fetchAppConfig() {
 
   try {
     const data = await appConfigClient.send(new GetConfigurationCommand(params));
-    return data.Content.toString();
+    const charCodes = new Uint8Array(data.Content);
+    const message = String.fromCharCode(...charCodes);
+    return message;
   } catch (error) {
     console.error(`Failed to fetch AppConfig: ${error}`);
     return null;
