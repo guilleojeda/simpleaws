@@ -140,6 +140,14 @@ Resources:
                 Action: 
                   - "s3:ListBucket"
                 Resource: !Sub 'arn:aws:s3:::${BucketName}'
+        - PolicyName: "AppConfig"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - "appconfig:GetConfiguration"
+                Resource: "*"
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -177,7 +185,7 @@ Resources:
 
           # Create directory for the app and copy the files to it
           mkdir -p /home/ec2-user/app
-          cp -r /home/ec2-user/simpleaws/Issue#33-AppConfigFromS3/nodejsapp/* /home/ec2-user/app/
+          cp -r /home/ec2-user/simpleaws/Issue#38-AppConfigFromS3/nodejsapp/* /home/ec2-user/app/
 
           # Navigate to the app directory
           cd /home/ec2-user/app
@@ -200,6 +208,8 @@ Resources:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
