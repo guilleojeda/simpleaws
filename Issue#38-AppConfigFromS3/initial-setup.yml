@@ -1,0 +1,219 @@
+Parameters:
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64'
+  BucketName:
+    Type: String
+
+Resources:
+  SimpleAWSVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSVPC
+
+  SimpleAWSSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSSubnet1
+
+  SimpleAWSSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSSubnet2
+
+  SimpleAWSInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: SimpleAWSInternetGateway
+
+  SimpleAWSVPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      InternetGatewayId: !Ref SimpleAWSInternetGateway
+
+  SimpleAWSRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      Tags:
+        - Key: Name
+          Value: SimpleAWSRouteTable
+
+  SimpleAWSRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: SimpleAWSVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref SimpleAWSRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SimpleAWSInternetGateway
+
+  SimpleAWSSubnetRouteTableAssociation1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SimpleAWSSubnet1
+      RouteTableId: !Ref SimpleAWSRouteTable
+
+  SimpleAWSSubnetRouteTableAssociation2:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SimpleAWSSubnet2
+      RouteTableId: !Ref SimpleAWSRouteTable
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access on port 3000
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access to the VPC Endpoint
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal: 
+              Service: 
+                - "ec2.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore  # Enables AWS Systems Manager
+      Policies: 
+        - PolicyName: "CloudWatchLogs"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+        - PolicyName: "S3"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                Resource: !Sub 'arn:aws:s3:::${BucketName}/*'
+              - Effect: "Allow"
+                Action: 
+                  - "s3:ListBucket"
+                Resource: !Sub 'arn:aws:s3:::${BucketName}'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - Ref: EC2Role
+
+  EC2Instance:
+    DependsOn: ConfigBucket
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      InstanceType: t4g.small
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref SimpleAWSSubnet1
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Install updates
+          yum update -y
+
+          # Install Node.js and npm
+          curl -sL https://rpm.nodesource.com/setup_16.x | bash -
+          yum install -y nodejs
+
+          # Install git
+          yum install -y git
+
+          # Clone the whole repo
+          cd /home/ec2-user
+          git clone https://github.com/guilleojeda/simpleaws.git
+
+          # Create directory for the app and copy the files to it
+          mkdir -p /home/ec2-user/app
+          cp -r /home/ec2-user/simpleaws/Issue#33-AppConfigFromS3/nodejsapp/* /home/ec2-user/app/
+
+          # Navigate to the app directory
+          cd /home/ec2-user/app
+
+          # Install app dependencies
+          npm install
+
+          # Set Environment Variables
+          touch /home/ec2-user/app/.env
+          echo "S3_BUCKET_NAME=${BucketName}" >> /home/ec2-user/app/.env
+          echo "FILE_NAME=review.txt" >> /home/ec2-user/app/.env
+          echo "AWS_REGION=${AWS::Region}" >> /home/ec2-user/app/.env
+
+          # Run app
+          nohup node src/index.js > /home/ec2-user/app/app.log 2>&1 &
+
+          echo "System up and running!"
+
+  ConfigBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref BucketName
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls : false
+        BlockPublicPolicy : false
+        IgnorePublicAcls : false
+        RestrictPublicBuckets : false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+Outputs:
+  EC2InstancePublicIp:
+    Description: The public IP address of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
