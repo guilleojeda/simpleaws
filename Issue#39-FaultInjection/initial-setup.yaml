@@ -20,7 +20,7 @@ Parameters:
   DBInstanceClass:
     Description: 'The instance type of database server.'
     Type: String
-    Default: 'db.t3.small'
+    Default: 'db.t4g.medium'
   DbUsername:
     Description: 'The master user name for the DB instance.'
     Type: String
@@ -29,12 +29,10 @@ Parameters:
     Description: 'The master password for the DB instance. Leave empty to autogenerate a secure password.'
     Type: String
     NoEcho: true
-    Default: 'VeryInsecurePassword123!'
+    Default: ''
   LatestAmiId:
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
     Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64'
-  BucketName:
-    Type: String
 
 Mappings:
   Database:
@@ -50,6 +48,10 @@ Mappings:
       DatabasePort: 5432
       DatabaseConnectionSubprotocol: postgresql
       Family: aurora-postgresql11
+
+
+Conditions:
+  HasDbPassword: !Not [ !Equals [!Ref 'DbPassword', ''] ]
 
 Resources:
   SimpleAWSVPC:
@@ -159,19 +161,30 @@ Resources:
       Roles:
         - Ref: EC2Role
 
-  EC2Instance:
-    DependsOn: ConfigBucket
-    Type: AWS::EC2::Instance
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: LaunchTemplate
     Properties:
-      IamInstanceProfile: !Ref EC2InstanceProfile
-      InstanceType: t4g.small
-      ImageId: !Ref LatestAmiId
-      SubnetId: !Ref SimpleAWSSubnet1
-      SecurityGroupIds:
-        - !Ref EC2SecurityGroup
-      UserData:
-        Fn::Base64: !Sub |
-          
+      LaunchTemplate: 
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 2
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      VPCZoneIdentifier:
+        - !Ref SimpleAWSSubnet1
+        - !Ref SimpleAWSSubnet2
+      Tags:
+        - Key: 'Name'
+          Value: 'SimpleAWS39'
+          PropagateAtLaunch: true
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT15M
+        WaitOnResourceSignals: true
 
   LaunchTemplate:
     DependsOn: DatabaseCluster
@@ -192,14 +205,12 @@ Resources:
         UserData:
           'Fn::Base64': !Sub |
             #!/bin/bash -ex
-            trap '/opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}' ERR
-            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchTemplate --region ${AWS::Region}
+            trap 'echo "An error occurred. Exiting." >&2; exit 1' ERR
 
             # Install updates
             yum update -y
 
             # Install Node.js and npm
-            curl -sL https://rpm.nodesource.com/setup_16.x | bash -
             yum install -y nodejs
 
             # Install git
@@ -211,6 +222,7 @@ Resources:
             cd simpleaws
             git sparse-checkout init --cone
             git sparse-checkout set Issue#39-FaultInjection
+            git checkout main
 
             # Create directory for the app and copy the files to it
             mkdir -p /home/ec2-user/app
@@ -393,9 +405,7 @@ Resources:
         - !Ref SimpleAWSSubnet2
       Tags:
         - Key: 'Name'
-          Value: !Sub "Database-subnet-group-${Environment}"
-        - Key: Environment
-          Value: !Ref Environment
+          Value: !Sub "Database-subnet-group-${AWS::StackName}"
 
   DatabaseSecret:
     Type: AWS::SecretsManager::Secret
@@ -412,9 +422,6 @@ Resources:
           PasswordLength: 40
           SecretStringTemplate: !Sub '{"username":"${DbUsername}"}'
       Name: !Join ['', [!Ref 'AWS::StackName', '-DBMasterSecret'] ]
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
           
   DatabaseSecretAttachment:
     Type: AWS::SecretsManager::SecretTargetAttachment
@@ -431,8 +438,7 @@ Resources:
     UpdateReplacePolicy: Snapshot
     Properties:
       DatabaseName: !Ref 'DatabaseName'
-      DBClusterIdentifier: !Join [ '-', [ !Ref 'DatabaseName', 'cluster' ] ]
-      DBClusterParameterGroupName: !Ref RDSDBClusterParameterGroup
+      DBClusterIdentifier: !Join [ '-', [ !Ref 'DatabaseName', 'cluster', !Sub '${AWS::StackName}' ] ]
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       Engine: !Ref 'DatabaseEngine'
       EngineMode: provisioned
@@ -447,13 +453,6 @@ Resources:
       - DatabaseSubnetGroup
       - DatabaseSecret
 
-  RDSDBClusterParameterGroup: 
-    Properties: 
-      Description: "RDS Aurora Cluster Parameter Group"
-      Family: !FindInMap [Database, !Ref "DatabaseEngine", Family]
-      Parameters: 
-        time_zone: US/Eastern
-    Type: "AWS::RDS::DBClusterParameterGroup"
   RDSDBInstance1: 
     Type: "AWS::RDS::DBInstance"
     Properties: 
@@ -476,6 +475,97 @@ Resources:
         Fn::GetAtt:
           - SimpleAWSSubnet2
           - AvailabilityZone
+
+  FISExperimentRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: FISExperimentRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: fis.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: FISExperimentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowFISExperimentLoggingActionsCloudwatch
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogDelivery'
+                  - 'logs:PutResourcePolicy'
+                  - 'logs:DescribeResourcePolicies'
+                  - 'logs:DescribeLogGroups'
+                Resource: '*'
+              - Sid: AllowFISExperimentRoleReadOnly
+                Effect: Allow
+                Action:
+                  - 'ec2:DescribeInstances'
+                  - 'ecs:DescribeClusters'
+                  - 'ecs:ListContainerInstances'
+                  - 'eks:DescribeNodegroup'
+                  - 'iam:ListRoles'
+                  - 'rds:DescribeDBInstances'
+                  - 'rds:DescribeDbClusters'
+                  - 'ssm:ListCommands'
+                Resource: '*'
+              - Sid: AllowFISExperimentRoleEC2Actions
+                Effect: Allow
+                Action:
+                  - 'ec2:RebootInstances'
+                  - 'ec2:StopInstances'
+                  - 'ec2:StartInstances'
+                  - 'ec2:TerminateInstances'
+                Resource: 'arn:aws:ec2:*:*:instance/*'
+              - Sid: AllowFISExperimentRoleECSActions
+                Effect: Allow
+                Action:
+                  - 'ecs:UpdateContainerInstancesState'
+                  - 'ecs:ListContainerInstances'
+                Resource: 'arn:aws:ecs:*:*:container-instance/*'
+              - Sid: AllowFISExperimentRoleEKSActions
+                Effect: Allow
+                Action:
+                  - 'ec2:TerminateInstances'
+                Resource: 'arn:aws:ec2:*:*:instance/*'
+              - Sid: AllowFISExperimentRoleFISActions
+                Effect: Allow
+                Action:
+                  - 'fis:InjectApiInternalError'
+                  - 'fis:InjectApiThrottleError'
+                  - 'fis:InjectApiUnavailableError'
+                Resource: 'arn:*:fis:*:*:experiment/*'
+              - Sid: AllowFISExperimentRoleRDSReboot
+                Effect: Allow
+                Action:
+                  - 'rds:RebootDBInstance'
+                Resource: 'arn:aws:rds:*:*:db/*'
+              - Sid: AllowFISExperimentRoleRDSFailOver
+                Effect: Allow
+                Action:
+                  - 'rds:FailoverDBCluster'
+                Resource: 'arn:aws:rds:*:*:cluster/*'
+              - Sid: AllowFISExperimentRoleSSMSendCommand
+                Effect: Allow
+                Action:
+                  - 'ssm:SendCommand'
+                Resource:
+                  - 'arn:aws:ec2:*:*:instance/*'
+                  - 'arn:aws:ssm:*:*:document/*'
+              - Sid: AllowFISExperimentRoleSSMCancelCommand
+                Effect: Allow
+                Action:
+                  - 'ssm:CancelCommand'
+                Resource: '*'
+
+  SimpleAwsFisLogsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: '/simpleaws39/fis-logs'
 
 Outputs:
   LoadBalancerDNSName:
