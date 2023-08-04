@@ -8,7 +8,7 @@ Parameters:
     AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
     ConstraintDescription: must begin with a letter and contain only alphanumeric
       characters.
-    Default: SimpleAWSDB
+    Default: simpleaws
   DatabaseEngine:
     Description: Database engine
     Type: String
@@ -153,6 +153,10 @@ Resources:
                   - "logs:CreateLogStream"
                   - "logs:PutLogEvents"
                 Resource: "*"
+              - Effect: "Allow"
+                Action: 
+                  - "secretsmanager:GetSecretValue"
+                Resource: !Ref DatabaseSecret
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -163,7 +167,11 @@ Resources:
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: LaunchTemplate
+    DependsOn:
+      - LaunchTemplate
+      - DatabaseCluster
+      - RDSDBInstance1
+      - RDSDBInstance2
     Properties:
       LaunchTemplate: 
         LaunchTemplateId: !Ref LaunchTemplate
@@ -237,9 +245,9 @@ Resources:
             # Set Environment Variables
             touch /home/ec2-user/app/.env
             echo "DB_HOST=${DatabaseCluster.Endpoint.Address}" >> /home/ec2-user/app/.env
-            echo "DB_PORT=!FindInMap [Database, !Ref DatabaseEngine, DatabasePort]" >> /home/ec2-user/app/.env
-            echo "DB_USER={{resolve:secretsmanager:${AWS::StackName}-DBMasterSecret:SecretString:username}}" >> /home/ec2-user/app/.env
-            echo "DB_PASSWORD={{resolve:secretsmanager:${AWS::StackName}-DBMasterSecret:SecretString:password}}" >> /home/ec2-user/app/.env
+            echo "DB_PORT=${DatabaseCluster.Endpoint.Port}" >> /home/ec2-user/app/.env
+            echo "DB_USER=$(aws secretsmanager get-secret-value --secret-id ${DatabaseSecret} --query 'SecretString' --output text | jq -r .username)" >> /home/ec2-user/app/.env
+            echo "DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id ${DatabaseSecret} --query 'SecretString' --output text | jq -r .password)" >> /home/ec2-user/app/.env
             echo "DB_DATABASE=${DatabaseName}" >> /home/ec2-user/app/.env
 
             # Run app
@@ -312,7 +320,7 @@ Resources:
     Properties:
       HealthCheckProtocol: 'HTTP'
       HealthCheckPath: '/health'
-      HealthCheckPort: '80'
+      HealthCheckPort: '3000'
       HealthCheckIntervalSeconds: '30'
       HealthCheckTimeoutSeconds: '5'
       HealthyThresholdCount: '3'
@@ -355,8 +363,8 @@ Resources:
       VpcId: !Ref SimpleAWSVPC
       SecurityGroupIngress:
       - IpProtocol: tcp
-        FromPort: 80
-        ToPort: 80
+        FromPort: 3000
+        ToPort: 3000
         SourceSecurityGroupId: !GetAtt LoadBalancerSecurityGroup.GroupId
 
   LoadBalancerSecurityGroup:
@@ -417,7 +425,13 @@ Resources:
         - HasDbPassword
         - !Ref 'AWS::NoValue'
         - 
-          ExcludeCharacters: '"@/\'
+          ExcludeCharacters:
+            !Join
+              - ''
+              - - '"'
+                - '@/\!:|`();\\?,&<>%$#'
+                - "'"
+                #Excluding characters "@/\!:|`();'?,&<>%$#
           GenerateStringKey: password
           PasswordLength: 40
           SecretStringTemplate: !Sub '{"username":"${DbUsername}"}'
@@ -441,6 +455,7 @@ Resources:
       DBClusterIdentifier: !Join [ '-', [ !Ref 'DatabaseName', 'cluster', !Sub '${AWS::StackName}' ] ]
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       Engine: !Ref 'DatabaseEngine'
+      Port: !FindInMap [Database, !Ref "DatabaseEngine", DatabasePort]
       EngineMode: provisioned
       VpcSecurityGroupIds: 
         - !Ref DbSecurityGroup
@@ -548,7 +563,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - 'rds:FailoverDBCluster'
-                Resource: 'arn:aws:rds:*:*:cluster/*'
+                Resource: '*'
               - Sid: AllowFISExperimentRoleSSMSendCommand
                 Effect: Allow
                 Action:
