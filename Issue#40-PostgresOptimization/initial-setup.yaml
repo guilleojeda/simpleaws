@@ -1,0 +1,487 @@
+
+Parameters:
+  DatabaseName:
+    Description: Name of the Database
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters.
+    Default: simpleaws
+  DatabaseEngine:
+    Description: Database engine
+    Type: String
+    AllowedValues:
+      - aurora
+      - aurora-mysql
+      - aurora-postgresql
+    Default: aurora-postgresql
+  DBInstanceClass:
+    Description: 'The instance type of database server.'
+    Type: String
+    Default: 'db.t4g.medium'
+  DbUsername:
+    Description: 'The master user name for the DB instance.'
+    Type: String
+    Default: simpleaws
+  DbPassword:
+    Description: 'The master password for the DB instance. Leave empty to autogenerate a secure password.'
+    Type: String
+    NoEcho: true
+    Default: ''
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64'
+
+Mappings:
+  Database:
+    aurora:
+      DatabasePort: 3306
+      DatabaseConnectionSubprotocol: mysql
+      Family: aurora5.6
+    aurora-mysql:
+      DatabasePort: 3306
+      DatabaseConnectionSubprotocol: mysql
+      Family: aurora-mysql5.7
+    aurora-postgresql:
+      DatabasePort: 5432
+      DatabaseConnectionSubprotocol: postgresql
+      Family: aurora-postgresql11
+
+
+Conditions:
+  HasDbPassword: !Not [ !Equals [!Ref 'DbPassword', ''] ]
+
+Resources:
+  SimpleAWSVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSVPC
+
+  SimpleAWSSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSSubnet1
+
+  SimpleAWSSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: SimpleAWSSubnet2
+
+  SimpleAWSInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: SimpleAWSInternetGateway
+
+  SimpleAWSVPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      InternetGatewayId: !Ref SimpleAWSInternetGateway
+
+  SimpleAWSRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref SimpleAWSVPC
+      Tags:
+        - Key: Name
+          Value: SimpleAWSRouteTable
+
+  SimpleAWSRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: SimpleAWSVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref SimpleAWSRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SimpleAWSInternetGateway
+
+  SimpleAWSSubnetRouteTableAssociation1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SimpleAWSSubnet1
+      RouteTableId: !Ref SimpleAWSRouteTable
+
+  SimpleAWSSubnetRouteTableAssociation2:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SimpleAWSSubnet2
+      RouteTableId: !Ref SimpleAWSRouteTable
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal: 
+              Service: 
+                - "ec2.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore  # Enables AWS Systems Manager
+      Policies: 
+        - PolicyName: "CloudWatchLogs"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: 
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+              - Effect: "Allow"
+                Action: 
+                  - "secretsmanager:GetSecretValue"
+                Resource: !Ref DatabaseSecret
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - Ref: EC2Role
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+      - LaunchTemplate
+      - DatabaseCluster
+      - RDSDBInstance1
+    Properties:
+      LaunchTemplate: 
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 1
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      VPCZoneIdentifier:
+        - !Ref SimpleAWSSubnet1
+        - !Ref SimpleAWSSubnet2
+      Tags:
+        - Key: 'Name'
+          Value: 'SimpleAWS39'
+          PropagateAtLaunch: true
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT15M
+        WaitOnResourceSignals: true
+
+  LaunchTemplate:
+    DependsOn: DatabaseCluster
+    Type: AWS::EC2::LaunchTemplate
+    Properties: 
+      LaunchTemplateName: 'SimpleAWSIssue38'
+      LaunchTemplateData: 
+        ImageId: !Ref LatestAmiId
+        InstanceType: t4g.small
+        IamInstanceProfile: 
+          Arn: !GetAtt
+            - EC2InstanceProfile
+            - Arn
+        SecurityGroupIds: 
+        - !GetAtt AppSecurityGroup.GroupId
+        Monitoring: 
+          Enabled: true
+        UserData:
+          'Fn::Base64': !Sub |
+            #!/bin/bash -ex
+            trap 'echo "An error occurred. Exiting." >&2; exit 1' ERR
+
+            # Install updates
+            yum update -y
+
+            # Install Node.js and npm
+            yum install -y nodejs
+
+            # Install git
+            yum install -y git
+
+            # Clone the relevant part of the repo
+            cd /home/ec2-user
+            git clone --no-checkout https://github.com/guilleojeda/simpleaws.git
+            cd simpleaws
+            git sparse-checkout init --cone
+            git sparse-checkout set Issue#40-PostgresOptimization
+            git checkout main
+
+            # Create directory for the app and copy the files to it
+            mkdir -p /home/ec2-user/scripts
+            cp -r /home/ec2-user/simpleaws/Issue#40-PostgresOptimization/db-scripts/* /home/ec2-user/scripts/
+
+            # Navigate to the app directory
+            #cd /home/ec2-user/scripts
+
+            # Install app dependencies
+            #npm install
+
+            # Set Environment Variables
+            touch /home/ec2-user/scripts/.env
+            echo "DB_HOST=${DatabaseCluster.Endpoint.Address}" >> /home/ec2-user/scripts/.env
+            echo "DB_PORT=${DatabaseCluster.Endpoint.Port}" >> /home/ec2-user/scripts/.env
+            echo "DB_USER=$(aws secretsmanager get-secret-value --secret-id ${DatabaseSecret} --query 'SecretString' --output text | jq -r .username)" >> /home/ec2-user/scripts/.env
+            echo "DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id ${DatabaseSecret} --query 'SecretString' --output text | jq -r .password)" >> /home/ec2-user/scripts/.env
+            echo "DB_DATABASE=${DatabaseName}" >> /home/ec2-user/scripts/.env
+
+            # Run app
+            #nohup node src/index.js > /home/ec2-user/app/app.log 2>&1 &
+
+            echo "System up and running!"
+
+            /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}
+
+  AutoScalingGroupScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'AutoScalingGroup'
+      Cooldown: '60'
+      ScalingAdjustment: 1
+  AutoScalingGroupScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref 'AutoScalingGroup'
+      Cooldown: '60'
+      ScalingAdjustment: -1
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-up if CPU > 50% for 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 50
+      AlarmActions: [!Ref 'AutoScalingGroupScaleUpPolicy']
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'AutoScalingGroup'
+      ComparisonOperator: GreaterThanThreshold
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-down if CPU < 70% for 10 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 10
+      Threshold: 70
+      AlarmActions: [!Ref 'AutoScalingGroupScaleDownPolicy']
+      Dimensions:
+      - Name: AutoScalingGroupName
+        Value: !Ref 'AutoScalingGroup'
+      ComparisonOperator: LessThanThreshold
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - LoadBalancerSecurityGroup
+    Properties:
+      Type: application
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref SimpleAWSSubnet1
+        - !Ref SimpleAWSSubnet2
+
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    DependsOn: LoadBalancer
+    Properties:
+      HealthCheckProtocol: 'HTTP'
+      HealthCheckPath: '/health'
+      HealthCheckPort: '3000'
+      HealthCheckIntervalSeconds: '30'
+      HealthCheckTimeoutSeconds: '5'
+      HealthyThresholdCount: '3'
+      UnhealthyThresholdCount: '5'
+      Port: '3000'
+      Protocol: HTTP
+      VpcId: !Ref SimpleAWSVPC
+
+  Httplistener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    DependsOn:
+      - LoadBalancer
+      - TargetGroup
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroup'
+          Type: forward
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: 'HTTP'
+
+  LoadBalancerHttpListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: Httplistener
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref 'TargetGroup'
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /*
+      ListenerArn: !Ref 'Httplistener'
+      Priority: 1
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP from the load balancer only
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 3000
+        ToPort: 3000
+        SourceSecurityGroupId: !GetAtt LoadBalancerSecurityGroup.GroupId
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP from the internet
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: '0.0.0.0/0'
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable TCP from the app
+      VpcId: !Ref SimpleAWSVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: !FindInMap [Database, !Ref "DatabaseEngine", DatabasePort]
+        ToPort: !FindInMap [Database, !Ref "DatabaseEngine", DatabasePort]
+        SourceSecurityGroupId: !GetAtt AppSecurityGroup.GroupId
+
+  DBEncryptionKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "KMS key used to encrypt RDS instance created in CFN stack: ${AWS::StackName}"
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: default
+        Statement:
+          Sid: "Default"
+          Effect: "Allow"
+          Principal:
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          Action: "kms:*"
+          Resource: "*"
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: CloudFormation managed DB subnet group
+      SubnetIds: 
+        - !Ref SimpleAWSSubnet1
+        - !Ref SimpleAWSSubnet2
+      Tags:
+        - Key: 'Name'
+          Value: !Sub "Database-subnet-group-${AWS::StackName}"
+
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Master secret for the RDS database
+      SecretString: !If [HasDbPassword, !Sub '{"username":"${DbUsername}","password":"${DbPassword}"}', !Ref 'AWS::NoValue']
+      GenerateSecretString:
+        'Fn::If':
+        - HasDbPassword
+        - !Ref 'AWS::NoValue'
+        - 
+          ExcludeCharacters:
+            !Join
+              - ''
+              - - '"'
+                - '@/\!:|`();\\?,&<>%$#'
+                - "'"
+                #Excluding characters "@/\!:|`();'?,&<>%$#
+          GenerateStringKey: password
+          PasswordLength: 40
+          SecretStringTemplate: !Sub '{"username":"${DbUsername}"}'
+      Name: !Join ['', [!Ref 'AWS::StackName', '-DBMasterSecret'] ]
+          
+  DatabaseSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId:
+        !Ref DatabaseSecret
+      TargetId:
+        !Ref DatabaseCluster
+      TargetType: AWS::RDS::DBCluster
+
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DatabaseName: !Ref 'DatabaseName'
+      DBClusterIdentifier: !Join [ '-', [ !Ref 'DatabaseName', 'cluster', !Sub '${AWS::StackName}' ] ]
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      Engine: !Ref 'DatabaseEngine'
+      Port: !FindInMap [Database, !Ref "DatabaseEngine", DatabasePort]
+      EngineMode: provisioned
+      VpcSecurityGroupIds: 
+        - !Ref DbSecurityGroup
+      MasterUsername: !Sub '{{resolve:secretsmanager:${AWS::StackName}-DBMasterSecret:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${AWS::StackName}-DBMasterSecret:SecretString:password}}'
+      EnableIAMDatabaseAuthentication: false
+      KmsKeyId: !Ref DBEncryptionKMSKey
+      StorageEncrypted: true
+    DependsOn:
+      - DatabaseSubnetGroup
+      - DatabaseSecret
+
+  RDSDBInstance1: 
+    Type: "AWS::RDS::DBInstance"
+    Properties: 
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceClass: !Ref DBInstanceClass
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      Engine: !Ref 'DatabaseEngine'
+      AvailabilityZone: 
+        Fn::GetAtt:
+          - SimpleAWSSubnet1
+          - AvailabilityZone
+
+Outputs:
+  LoadBalancerDNSName:
+    Description: "The DNS name of the Load Balancer"
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: LoadBalancerDNSName
